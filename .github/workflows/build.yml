@@ -1,0 +1,71 @@
+name: Build NEXEND Remote C3
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "NEXEND_Remote_C3.ino"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+env:
+  SKETCH_FILE: NEXEND_Remote_C3.ino
+  SKETCH_NAME: NEXEND_Remote_C3
+  ESP32_CORE: "3.2.0"
+  FQBN: "esp32:esp32:esp32c3:CDCOnBoot=cdc,FlashMode=dio,CPUFreq=160"
+  ESP32_INDEX: "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache core dan library
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino-${{ env.ESP32_CORE }}-${{ hashFiles('.github/workflows/build.yml') }}
+
+      - name: Pasang arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Pasang core ESP32 dan library
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls "$ESP32_INDEX"
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@${ESP32_CORE}"
+          arduino-cli lib install "RF24"
+
+      - name: Siapkan sketch tanpa auto-prototype
+        run: |
+          mkdir -p "_build/${SKETCH_NAME}"
+          cp "${SKETCH_FILE}" "_build/${SKETCH_NAME}/app.cpp"
+          printf '#include <Arduino.h>\n' > "_build/${SKETCH_NAME}/${SKETCH_NAME}.ino"
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn "${FQBN}" \
+            --output-dir out \
+            "_build/${SKETCH_NAME}"
+
+      - name: Rapikan hasil bin
+        run: |
+          mkdir -p release
+          cp "out/${SKETCH_NAME}.ino.bin" "release/${SKETCH_NAME}.bin"
+          cp "out/${SKETCH_NAME}.ino.merged.bin" "release/${SKETCH_NAME}_merged_flash_0x0.bin"
+          cp "out/${SKETCH_NAME}.ino.bootloader.bin" "release/bootloader_0x0.bin"
+          cp "out/${SKETCH_NAME}.ino.partitions.bin" "release/partitions_0x8000.bin"
+          ls -lh release
+
+      - name: Upload bin
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.SKETCH_NAME }}-bin
+          path: release/*.bin
